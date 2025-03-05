@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crazy Printing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900">
+  <div class="w-full max-w-3xl bg-gray-800 p-6 rounded-lg shadow-lg text-white mx-auto mt-10">
+    <h1 class="text-3xl font-bold mb-6 text-center">3D Printer Queue</h1>
+
+    <div class="mb-6 text-center">
+      <h3 class="text-xl font-semibold">Printer Status:</h3>
+      <p id="printer-status" class="text-lg {% if printer_connected %}text-green-400{% else %}text-red-400{% endif %}">
+        {% if '.' in printer_status_message %}
+          {{ printer_status_message.split('.')[0] + '.' }}
+        {% else %}
+          {{ printer_status_message }}
+        {% endif %}
+      </p>
+    </div>
+
+    <div class="mb-6 text-center">
+      <h3 class="text-xl font-semibold">Currently Printing:</h3>
+      <p id="current-printing" class="text-lg text-green-300">
+          {{ current_print if current_print else "No file is currently printing." }}
+      </p>
+  
+      <div id="progress-container" class="w-full bg-gray-700 rounded-lg overflow-hidden mt-2" style="display: none;">
+          <div id="progress-bar" class="bg-green-500 h-4" style="width: 0%;"></div>
+      </div>
+      
+      <p id="progress-text" class="text-lg text-gray-400 mt-2">0%</p>
+  </div>
+  
+    <div class="mb-6">
+      <h3 class="text-xl font-semibold mb-3">Files in Queue:</h3>
+      <ul id="queue" class="space-y-2">
+        {% for file, count in print_queue.items() %}
+          <li class="bg-blue-600 text-white text-center p-3 rounded-lg font-medium flex justify-between items-center">
+            <span>{{ file }} (x<span id="count-{{ file }}">{{ count }}</span>)</span>
+            <div>
+              <button onclick="adjustCount('{{ file }}', 1)" class="bg-green-500 hover:bg-green-600 px-2 rounded">+</button>
+              <button onclick="adjustCount('{{ file }}', -1)" class="bg-red-500 hover:bg-red-600 px-2 rounded">-</button>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </div>
+
+    <div class="mb-6 flex justify-center space-x-4">
+      <button onclick="startQueue()" class="bg-blue-500 hover:bg-blue-600 text-white py-2 px-4 rounded-lg">
+        Start Queue
+      </button>
+      <button onclick="clearQueue()" class="bg-red-500 hover:bg-red-600 text-white py-2 px-4 rounded-lg">
+        Clear Queue
+      </button>
+    </div>
+
+    <div class="mb-6">
+      <h3 class="text-xl font-semibold mb-3">Print File Individually:</h3>
+      <!-- <select id="fileSelect" class="p-2 border border-gray-600 bg-gray-700 rounded-lg text-white">
+        {% for file in files %}
+          <option value="{{ file }}">{{ file }}</option>
+        {% endfor %}
+      </select> -->
+      <form id="uploadForm" enctype="multipart/form-data" class="flex flex-col items-center">
+        <input type="file" id="fileInput" name="file" accept=".gcode" required class="mb-3 p-2 border border-gray-600 bg-gray-700 rounded-lg text-white" />
+        <button type="submit" onclick="uploadFile(event)" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg">
+          Upload
+        </button>
+      </form>
+      <button onclick="printNow()" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg">
+        Print Now
+      </button>
+    </div>
+
+    <div class="mb-6">
+      <h3 class="text-xl font-semibold mb-3">Add files in Queue:</h3>
+      <form id="uploadForm" enctype="multipart/form-data" class="flex flex-col items-center">
+        <input type="file" id="fileInput" name="file" accept=".gcode" required class="mb-3 p-2 border border-gray-600 bg-gray-700 rounded-lg text-white" />
+        <button type="submit" onclick="uploadFile(event)" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg">
+          Upload
+        </button>
+      </form>
+    </div>
+    <div class="mb-6 text-center">
+      <h3 class="text-xl font-semibold">Live Camera Feed:</h3>
+      <img src="{{ url_for('video_feed') }}" class="w-full max-w-md mx-auto rounded-lg shadow-lg border border-gray-700" />
+  </div>
+ 
+
+  
+  </div>
+
+  <script>
+    function startQueue() {
+      fetch("/start_queue", { method: "POST" })
+        .then(response => response.json())
+        .then(data => {
+          alert(data.message);
+        });
+    }
+
+    function clearQueue() {
+      fetch("/clear_queue", { method: "POST" })
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById("queue").innerHTML = "";
+          alert(data.message);
+        });
+    }
+
+    function fetchPrintProgress() {
+    fetch("/print_progress")
+        .then(response => response.json())
+        .then(data => {
+            let progress = data.progress;
+            let progressBar = document.getElementById("progress-bar");
+            let progressText = document.getElementById("progress-text");
+            let progressContainer = document.getElementById("progress-container");
+
+            if (progress > 0) {
+                progressContainer.style.display = "block";
+                progressBar.style.width = progress + "%";
+                progressText.innerText = progress + "%";
+            } else {
+                progressContainer.style.display = "none";
+            }
+
+            if (progress < 100) {
+                setTimeout(fetchPrintProgress, 2000); 
+            }
+        });
+      }
+
+
+fetchPrintProgress();
+
+    function uploadFile(event) {
+      event.preventDefault();
+      let formData = new FormData(document.getElementById("uploadForm"));
+
+      fetch("/upload", { method: "POST", body: formData })
+        .then(response => response.json())
+        .then(data => {
+          alert(data.message);
+          if (data.message === "File uploaded successfully") {
+            location.reload(); 
+          }
+        });
+    }
+
+    function printNow() {
+  let filename = document.getElementById("fileSelect").value;
+  
+  fetch("/print_now", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename: filename })
+  })
+    .then(response => response.json())
+    .then(data => {
+      alert(data.message);
+    })
+    .catch(error => {
+      alert("❌ Error connecting to the server.");
+    });
+}
+
+
+    function adjustCount(filename, delta) {
+      fetch("/adjust_count", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: filename, delta: delta })
+      })
+        .then(response => response.json())
+        .then(data => {
+          document.getElementById(`count-${filename}`).innerText = data.count;
+        });
+    }
+  </script>
+</body>
+</html>
