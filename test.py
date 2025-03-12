@@ -9,9 +9,9 @@ from serial.tools import list_ports
 from tqdm import tqdm
 
 
-cooldown_time = 180  #cooldown in seconds
-PORT = "COM3" #printer's port
-ARDUINO_PORT = "COM6" #arduino's port
+cooldown_time = 180
+PORT = "COM5"
+ARDUINO_PORT = "COM13" #arduino's port
 BAUDRATE = 115200
 UPLOAD_FOLDER = "uploads"
 camera = cv2.VideoCapture(0)
@@ -83,11 +83,15 @@ def send_gcode(filename):
                     break
             print_progress=int(((index+1)/total_commands)*100)
         print(f"✅ {filename} print completed!")
+        ser.write(("G1 Z180 ; \n").encode())
         ser.close()
         print_progress=100
         time.sleep(cooldown_time) 
         arduino = serial.Serial(ARDUINO_PORT, 9600, timeout=2)
-        arduino.serial.write(("x").encode())
+        time.sleep(2)
+        arduino.serial.write(("start").encode())
+        time.sleep(20)
+        arduino.close()
     except Exception as e:
         print(f"❌ Error while printing {filename}: {e}")
 

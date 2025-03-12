@@ -1,20 +1,23 @@
+
+
 import os
 import time
 import serial
 import threading
-from flask import Flask, render_template, request, jsonify,Response,redirect,url_for,session
+from flask import Flask, render_template, request, jsonify,Response,stream_with_context
 from serial.tools import list_ports
 from tqdm import tqdm
 import cv2
+from io import StringIO
+import sys
 
 
 COOL_DOWN_TIME = 300  #cooldown in seconds
 PORT = "COM5" #printer's port
 BAUDRATE = 115200
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = "queue"
 ARDUINO_PORT = "COM13" 
 CHECK_INTERVAL=1 # Checking printer connection after this many seconds
-
 file_counts={}
 app = Flask(__name__)
 print_queue = {}
@@ -22,28 +25,19 @@ current_print = None
 printer_connected = False
 printer_status_message = "Checking printer connection..."
 queue_running = False
-current_print_progress = {"file": None, "progress": 0, "total": 0}  # Track printing progress
-cooldown_time_left = 0
-cooldown_active = False
-
 camera = cv2.VideoCapture(0)
-
 Print_now_folder = "Print_now_files"  # folder for print-now files
 
-
 if not os.path.exists(Print_now_folder):
-    os.makedirs(Print_now_folder)
-      
-if not os.path.exists(UPLOAD_FOLDER):
-    os.makedirs(UPLOAD_FOLDER)
+    os.makedirs(Print_now_folder)  
 
 def check_printer_connection():
     global printer_connected, printer_status_message
 
-    ports = [p.device for p in list_ports.comports()]
-    print(f"🔍 Detected Ports: {ports}")
+    # ports = [p.device for p in list_ports.comports()]
+    # print(f"🔍 Detected Ports: {ports}")
 
-    if PORT in ports:
+    if PORT :
         try:
             ser = serial.Serial(PORT, BAUDRATE, timeout=2)
             time.sleep(2)
@@ -59,82 +53,124 @@ def check_printer_connection():
     else:
         printer_connected = False
         printer_status_message = f"❌ Printer not found on {PORT}. Check connection."
+
 check_printer_connection()
+
 
 def periodic_printer_check():
     while True:
         check_printer_connection()
         time.sleep(CHECK_INTERVAL)
 
+
+threading.Thread(target=periodic_printer_check, daemon=True).start()
+
 def get_gcode_files():
     return sorted([f for f in os.listdir(UPLOAD_FOLDER) if f.lower().endswith(".gcode")])
 
+
+# def send_gcode(filename):
+#     global current_print
+
+#     file_path = os.path.join(UPLOAD_FOLDER, filename)
+#     if not os.path.exists(file_path):
+#         print(f"❌ Error: '{filename}' not found.")
+#         return
+
+#     try:
+#         ser = serial.Serial(PORT, BAUDRATE, timeout=2)
+#         time.sleep(2)
+
+#         with open(file_path, "r") as file:
+#             codes = [line.strip() for line in file if line.strip() and not line.startswith(";")]
+
+#         print(f"\n🚀 Sending {filename} to the printer...\n")
+#         tqdm_bar = tqdm(codes, unit=" cmds", ncols=100)
+
+#         for code in tqdm_bar:
+#             ser.write((code + "\n").encode())  
+#             while True:
+#                 response = ser.readline().decode().strip()
+#                 if response:
+#                     print(f"< {response}")
+#                 if response.lower().startswith("ok") or "error" in response.lower():
+#                     break
+
+#         print(f"✅ {filename} print completed!")
+#         ser.write(("G1 Z180 ; \n").encode())
+        
+#         print_progress=100
+#         time.sleep(COOL_DOWN_TIME) 
+#         arduino = serial.Serial(ARDUINO_PORT, 9600, timeout=2)
+#         time.sleep(2)
+#         arduino.write(("start").encode())
+
+#         time.sleep(45)
+#         arduino.close()
+#         ser.close()
+#     except Exception as e:
+#         print(f"❌ Error while printing {filename}: {e}")
+
+#     current_print = None  
+
+# currentpriont,cooldown timer,removal display
+
+
 def process_print_queue():
-    global print_queue, current_print,printer_connected
+    global print_queue, current_print
 
     while print_queue:
         item = print_queue.pop(0)  # Get the first item in the queue
         file_name = item["file_name"]
         count = item["count"]
-        if(count==0 ):
-            os.remove(os.path.join(UPLOAD_FOLDER, file_name))
+
         for i in range(count):  # Print it 'count' times
             print(f"🖨️ Printing {file_name} (Attempt {i+1} of {count})")
             send_gcode(os.path.join(UPLOAD_FOLDER, file_name))  # Call send_gcode()
 
 def send_gcode(file_path):
-    global current_print, current_print_progress,cooldown_time_left,cooldown_active
+    global current_print
     current_print = os.path.basename(file_path)
-   
     if not os.path.exists(file_path):
         print(f"❌ Error: '{file_path}' not found.")
         return
+
     try:
         ser = serial.Serial(PORT, BAUDRATE, timeout=2)
         time.sleep(2)
+
         with open(file_path, "r") as file:
             codes = [line.strip() for line in file if line.strip() and not line.startswith(";")]
-        total_lines = len(codes)
-        current_print_progress = {"file": current_print, "progress": 0, "total": total_lines}
+
         print(f"\n🚀 Sending {os.path.basename(file_path)} to the printer...\n")
-        for i, code in enumerate(tqdm(codes, unit=" cmds", ncols=100)):
-            ser.write((code + "\n").encode())
+        
+        for code in tqdm(codes, unit=" cmds", ncols=100):
+            ser.write((code + "\n").encode())  
             while True:
                 response = ser.readline().decode().strip()
                 if response:
                     print(f"< {response}")
                 if response.lower().startswith("ok") or "error" in response.lower():
                     break
-            current_print_progress["progress"] = i + 1
+
         print(f"✅ {os.path.basename(file_path)} print completed!")
-        session["print_complete"] = True  
-        
         ser.write(("G1 Z180 ; \n").encode())
 
-        cooldown_time_left=COOL_DOWN_TIME
-        cooldown_active=True
-
-        while(cooldown_time_left>0):
-            time.sleep(1)
-            cooldown_time_left-=1
-
-        cooldown_active=False
-
-        session["cooldown_complete"] = True 
-        
+        time.sleep(COOL_DOWN_TIME)
         arduino = serial.Serial(ARDUINO_PORT, 9600, timeout=2)
         time.sleep(2)
-        arduino.write("start".encode())
+        arduino.write(("start").encode())
         time.sleep(45)
         arduino.close()
         ser.close()
+
     except Exception as e:
         print(f"❌ Error while printing {os.path.basename(file_path)}: {e}")
-    current_print = None
-    current_print_progress = {"file": None, "progress": 0, "total": 0}
+
+    current_print = None  
 
 def start_queue():
-    global printer_connected, print_queue, current_print, queue_running
+    global print_queue, current_print, queue_running,printer_connected
 
     if not printer_connected:
         print("❌ Printer not connected. Cannot start queue.")
@@ -147,11 +183,13 @@ def start_queue():
     queue_running = True
 
     while queue_running and printer_connected and print_queue:
-        filename, count = print_queue.popitem()
-        for _ in range(count):
-            print(f"🖨️ Printing: {filename}")
-            send_gcode(filename)
-            time.sleep(1)
+        item = print_queue.pop(0)  # Get the first item in the queue
+        file_name = item["file_name"]
+        count = item["count"]
+
+        for i in range(count):  # Print it 'count' times
+            print(f"🖨️ Printing {file_name} (Attempt {i+1} of {count})")
+            send_gcode(os.path.join(UPLOAD_FOLDER, file_name))  # Call send_gcode()
 
 def generate_frames():
     while True:
@@ -164,11 +202,26 @@ def generate_frames():
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             
+# LOG_FILE = "printer_logs.txt"  # Log file to store print statements
+
+# Redirect print output to a file
+# class Logger(object):
+#     def __init__(self, filename=LOG_FILE):
+#         self.terminal = sys.stdout
+#         self.log = open(filename, "w", encoding="utf-8", buffering=1)  # ✅ Fix: Use utf-8 encoding
+
+
+#     def write(self, message):
+#         self.terminal.write(message)
+#         self.log.write(message)
+
+#     def flush(self):
+#         self.terminal.flush()
+#         self.log.flush()
+
+# sys.stdout = Logger()  # Redirect stdout
+
 # Flask
-
-
-#threading.Thread(target=periodic_printer_check, daemon=True).start()
-
 @app.route("/")
 def index():
     return render_template(
@@ -180,16 +233,13 @@ def index():
         print_queue=print_queue,
     )
 
+
 @app.route("/printer_status")
 def printer_status():
     return jsonify({
         "printer_connected": printer_connected,
         "printer_status_message": printer_status_message
     })
-    
-@app.route("/print_progress")
-def print_progress():
-    return jsonify(current_print_progress)
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -207,6 +257,16 @@ def upload_file():
         print_queue[file.filename] = 1
 
     return jsonify({"message": "File uploaded successfully"}), 200
+
+# @app.route("/logs")
+# def get_logs():
+#     """Serve the log file content as JSON."""
+#     try:
+#         with open(LOG_FILE, "r") as f:
+#             logs = f.readlines()
+#         return jsonify({"logs": logs})
+#     except Exception as e:
+#         return jsonify({"error": str(e)}), 500
 
 @app.route("/print_now", methods=["POST"])
 def print_now():
@@ -230,6 +290,42 @@ def print_now():
 def start_printing():
     threading.Thread(target=process_print_queue).start()  # Run in background
     return redirect(url_for("index"))
+
+# @app.route('/adjust_count', methods=['POST'])
+# def adjust_count():
+#     data = request.get_json()
+    
+#     print("Received Data:", data)  # Debugging Line
+    
+#     if not data:
+#         return jsonify({"error": "Invalid JSON data"}), 400
+
+#     filename = data.get("file_name")
+#     action = data.get("action")
+
+#     if not filename or action not in ["increase", "decrease"]:
+#         return jsonify({"error": "Invalid input"}), 400
+
+#     # Initialize file count if not exists
+#     if filename not in file_counts:
+#         file_counts[filename] = 0
+
+#     # Adjust the count
+#     if action == "increase":
+#         file_counts[filename] += 1
+#     elif action == "decrease" and file_counts[filename] > 0:
+#         file_counts[filename] -= 1
+
+#     # Print the updated count
+#     print(f"File: {filename}, Count: {file_counts[filename]}")
+
+#     return jsonify({"file_name": filename, "count": file_counts[filename]})
+
+
+
+
+
+
 
 @app.route("/clear_queue", methods=["POST"])
 def clear_queue():
@@ -261,25 +357,8 @@ def video_feed():
     return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 
-@app.route("/cooldown_status")
-def cooldown_status():
-    return jsonify({"cooldown": cooldown_time_left, "active": cooldown_active})
-
-@app.route("/check_alerts")
-def check_alerts():
-    """Returns alert messages for printing and cooldown completion."""
-    alert_messages = {}
-
-    if session.get("print_complete"):
-        alert_messages["print_complete"] = "Printing is complete!"
-        session.pop("print_complete")  # Remove after sending
-
-    if session.get("cooldown_complete"):
-        alert_messages["cooldown_complete"] = "Part will now be removed."
-        session.pop("cooldown_complete")  # Remove after sending
-
-    return jsonify(alert_messages)
-
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
 # Run Flask
 if __name__ == "__main__":

@@ -22,29 +22,57 @@
       </p>
     </div>
 
-    <div class="mb-6 text-center">
+    <!-- <div class="mb-6 text-center">
       <h3 class="text-xl font-semibold">Currently Printing:</h3>
-      <p id="current-printing" class="text-lg text-green-300">
-          {{ current_print if current_print else "No file is currently printing." }}
-      </p>
-  
-      <div id="progress-container" class="w-full bg-gray-700 rounded-lg overflow-hidden mt-2" style="display: none;">
-          <div id="progress-bar" class="bg-green-500 h-4" style="width: 0%;"></div>
+      <p id="print-status">
+        {% if current_print %}
+            Currently Printing: <span class="text-green-300">{{ current_print }}</span>
+        {% else %}
+            <span class="text-gray-400">No file is currently printing.</span>
+        {% endif %}
+    </p>
+    
+    </div> -->
+
+    <div id="print-progress-section" class="mb-6 text-center hidden">
+      <h3 class="text-xl font-semibold">Print Progress:</h3>
+      <p id="print-progress-text" class="text-white-600"></p>
+      <div class="w-1/2 mx-auto bg-gray-300 rounded-lg">
+        <div id="print-progress-bar" class="bg-green-500 h-6 rounded-lg text-white flex items-center justify-center text-sm" style="width: 0%;">
+          0%
+        </div>
       </div>
-      
-      <p id="progress-text" class="text-lg text-gray-400 mt-2">0%</p>
-  </div>
+    </div>
+    
+
+    <div class="mb-6 text-center">
+      <h3 class="text-xl font-semibold">Cooldown Timer:</h3>
+      <p id="cooldown-timer" class="text-red-400 text-lg">No cooldown active</p>
+    </div>
+    
+
+    <div class="mb-6">
+      <h3 class="text-xl font-semibold mb-3">Print File Individually:</h3>
   
+    
+      <input type="file" id="filePicker" accept=".gcode" class="mb-3 p-2 border border-gray-600 bg-gray-700 rounded-lg text-white" />
+      
+    
+      <button onclick="printNow()" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg">
+        Print Now
+      </button>
+    </div>
+
     <div class="mb-6">
       <h3 class="text-xl font-semibold mb-3">Files in Queue:</h3>
       <ul id="queue" class="space-y-2">
         {% for file, count in print_queue.items() %}
           <li class="bg-blue-600 text-white text-center p-3 rounded-lg font-medium flex justify-between items-center">
             <span>{{ file }} (x<span id="count-{{ file }}">{{ count }}</span>)</span>
-            <div>
+            <!-- <div>
               <button onclick="adjustCount('{{ file }}', 1)" class="bg-green-500 hover:bg-green-600 px-2 rounded">+</button>
               <button onclick="adjustCount('{{ file }}', -1)" class="bg-red-500 hover:bg-red-600 px-2 rounded">-</button>
-            </div>
+            </div> -->
           </li>
         {% endfor %}
       </ul>
@@ -59,23 +87,7 @@
       </button>
     </div>
 
-    <div class="mb-6">
-      <h3 class="text-xl font-semibold mb-3">Print File Individually:</h3>
-      <!-- <select id="fileSelect" class="p-2 border border-gray-600 bg-gray-700 rounded-lg text-white">
-        {% for file in files %}
-          <option value="{{ file }}">{{ file }}</option>
-        {% endfor %}
-      </select> -->
-      <form id="uploadForm" enctype="multipart/form-data" class="flex flex-col items-center">
-        <input type="file" id="fileInput" name="file" accept=".gcode" required class="mb-3 p-2 border border-gray-600 bg-gray-700 rounded-lg text-white" />
-        <button type="submit" onclick="uploadFile(event)" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg">
-          Upload
-        </button>
-      </form>
-      <button onclick="printNow()" class="bg-green-500 hover:bg-green-600 text-white py-2 px-4 rounded-lg">
-        Print Now
-      </button>
-    </div>
+    
 
     <div class="mb-6">
       <h3 class="text-xl font-semibold mb-3">Add files in Queue:</h3>
@@ -86,14 +98,18 @@
         </button>
       </form>
     </div>
+    <!-- <div class="mb-6">
+      <h3 class="text-xl font-semibold mb-3">Printer Logs:</h3>
+      <div id="log-container" class="bg-black text-green-400 p-4 rounded-lg h-64 overflow-auto">
+        <p>Loading logs...</p>
+      </div>
+    </div> -->
+    
     <div class="mb-6 text-center">
       <h3 class="text-xl font-semibold">Live Camera Feed:</h3>
       <img src="{{ url_for('video_feed') }}" class="w-full max-w-md mx-auto rounded-lg shadow-lg border border-gray-700" />
   </div>
- 
-
-  
-  </div>
+</div>
 
   <script>
     function startQueue() {
@@ -104,6 +120,22 @@
         });
     }
 
+    function updateCooldown() {
+    fetch("/cooldown_status")
+      .then(response => response.json())
+      .then(data => {
+        let cooldownTimer = document.getElementById("cooldown-timer");
+        if (data.cooldown > 0) {
+          cooldownTimer.innerText = `Cooldown: ${data.cooldown} seconds remaining`;
+        } else {
+          cooldownTimer.innerText = "No cooldown active";
+        }
+      })
+      .catch(error => console.error("Error fetching cooldown status:", error));
+  }
+
+  setInterval(updateCooldown, 1000); // Update every second
+
     function clearQueue() {
       fetch("/clear_queue", { method: "POST" })
         .then(response => response.json())
@@ -112,32 +144,6 @@
           alert(data.message);
         });
     }
-
-    function fetchPrintProgress() {
-    fetch("/print_progress")
-        .then(response => response.json())
-        .then(data => {
-            let progress = data.progress;
-            let progressBar = document.getElementById("progress-bar");
-            let progressText = document.getElementById("progress-text");
-            let progressContainer = document.getElementById("progress-container");
-
-            if (progress > 0) {
-                progressContainer.style.display = "block";
-                progressBar.style.width = progress + "%";
-                progressText.innerText = progress + "%";
-            } else {
-                progressContainer.style.display = "none";
-            }
-
-            if (progress < 100) {
-                setTimeout(fetchPrintProgress, 2000); 
-            }
-        });
-      }
-
-
-fetchPrintProgress();
 
     function uploadFile(event) {
       event.preventDefault();
@@ -154,34 +160,120 @@ fetchPrintProgress();
     }
 
     function printNow() {
-  let filename = document.getElementById("fileSelect").value;
-  
-  fetch("/print_now", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ filename: filename })
-  })
+    let fileInput = document.getElementById("filePicker");
+    
+    if (!fileInput.files.length) {
+        alert("❌ Please select a file first!");
+        return;
+    }
+
+    let file = fileInput.files[0]; // Get selected file
+    let formData = new FormData();
+    formData.append("file", file); // Append file to FormData
+
+    fetch("/print_now", {
+        method: "POST",
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => alert(data.message))
+    .catch(error => console.error("Error:", error));
+}
+// function fetchLogs() {
+//     fetch("/logs")
+//       .then(response => response.json())
+//       .then(data => {
+//         let logContainer = document.getElementById("log-container");
+//         logContainer.innerHTML = ""; // Clear previous logs
+
+//         if (data.logs) {
+//           data.logs.forEach(log => {
+//             let logLine = document.createElement("p");
+//             logLine.textContent = log;
+//             logContainer.appendChild(logLine);
+//           });
+
+//           logContainer.scrollTop = logContainer.scrollHeight; // Auto-scroll to the latest log
+//         }
+//       })
+//       .catch(error => console.error("Error fetching logs:", error));
+//   }
+  function updateCurrentPrint() {
+    fetch("/current_print")
     .then(response => response.json())
     .then(data => {
-      alert(data.message);
+        let printStatus = document.getElementById("print-status");
+        if (data.current_print) {
+            printStatus.innerHTML = `Currently Printing: <span class="text-green-300">${data.current_print}</span>`;
+        } else {
+            printStatus.innerHTML = `<span class="text-gray-400">No file is currently printing.</span>`;
+        }
     })
-    .catch(error => {
-      alert("❌ Error connecting to the server.");
-    });
+    .catch(error => console.error("Error fetching print status:", error));
 }
 
+ 
+  setInterval(updateCurrentPrint, 5000);
 
-    function adjustCount(filename, delta) {
-      fetch("/adjust_count", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filename: filename, delta: delta })
+  function updatePrintProgress() {
+    fetch("/print_progress")
+      .then(response => response.json())
+      .then(data => {
+        let progressSection = document.getElementById("print-progress-section");
+        let progressText = document.getElementById("print-progress-text");
+        let progressBar = document.getElementById("print-progress-bar");
+
+        if (data.file) {
+          let percent = Math.round((data.progress / data.total) * 100);
+          percent = isNaN(percent) ? 0 : percent;
+
+          progressSection.classList.remove("hidden");
+          progressText.innerText = `Printing: ${data.file} (${data.progress}/${data.total})`;
+          progressBar.style.width = percent + "%";
+          progressBar.innerText = percent + "%";
+
+        } else {
+          progressSection.classList.add("hidden");
+        }
       })
+      .catch(error => console.error("Error fetching print progress:", error));
+  }
+
+  setInterval(updatePrintProgress, 1000);
+
+  function checkAlerts() {
+    fetch("/check_alerts")
         .then(response => response.json())
         .then(data => {
-          document.getElementById(`count-${filename}`).innerText = data.count;
-        });
-    }
+            if (data.print_complete) {
+                alert(data.print_complete);
+            }
+            if (data.cooldown_complete) {
+                alert(data.cooldown_complete);
+            }
+        })
+        .catch(error => console.error("Error checking alerts:", error));
+}
+setInterval(checkAlerts,5000);
+//   function adjustCount(filename, delta) {
+//   fetch("/adjust_count", {
+//     method: "POST",
+//     headers: { "Content-Type": "application/json" },
+//     body: JSON.stringify({ filename: filename, delta: delta })
+//   })
+//   .then(response => response.json())
+//   .then(data => {
+//     console.log("Response data:", data);
+//     let countElement = document.getElementById(`count-${filename}`);
+//     if (countElement) {
+//       countElement.innerText = data.count;
+//     } else {
+//       console.error("Element not found: ", `count-${filename}`);
+//     }
+//   })
+//   .catch(error => console.error("Error:", error));
+// }
+
   </script>
 </body>
 </html>

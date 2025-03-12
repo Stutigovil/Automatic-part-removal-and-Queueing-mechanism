@@ -1,0 +1,34 @@
+🔍 Detected Ports: ['COM5']
+
+🚀 Sending FQ5_test copy.gcode to the printer...
+
+< ok 0
+< ok 0
+< T:219.82 /220 B:65.10 /65 B@:0 @:93
+< ok 0
+< ok 0
+< TargetExtr0:220
+< ok 0
+< T:219.82 /220 B:65.10 /65 B@:0 @:93
+< ok 0
+< TargetExtr0:220
+< ok 0
+< ok 0
+< ok 0
+< ok 0
+< ok 0
+< ok 0
+< ok 0
+< Info:Autoleveling disabled
+< busy:processing
+< SelectExtruder:0
+< FlowMultiply:100
+< X:0.00 Y:0.00 Z:216.663 E:0.0000
+< Info:Autoleveling enabled
+< ok 0
+< ok 0
+< ok 0
+< ok 0
+< Fanspeed:255
+< ok 0
+< ok 0
