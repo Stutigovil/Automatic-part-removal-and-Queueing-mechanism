@@ -8,8 +8,12 @@ from flask import Flask, render_template, request, jsonify,Response,stream_with_
 from serial.tools import list_ports
 from tqdm import tqdm
 
+#state_lock = threading.Lock()
 
 cooldown_time = 180
+cooldown_time_left = 0
+cooldown_running = False
+
 PORT = "COM5"
 ARDUINO_PORT = "COM13" #arduino's port
 BAUDRATE = 115200
@@ -26,7 +30,7 @@ queue_running = False
 
 def check_printer_connection():
     global printer_connected, printer_status_message
-
+ 
     ports = [p.device for p in list_ports.comports()]
     print(f"🔍 Detected Ports: {ports}")
 
@@ -54,7 +58,8 @@ def get_gcode_files():
 
 
 def send_gcode(filename):
-    global current_print,print_progress
+    global current_print, print_progress, cooldown_time_left, cooldown_running,cooldown_time
+    # global cooldown_time_left, cooldown_running
 
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     if not os.path.exists(file_path):
@@ -85,13 +90,23 @@ def send_gcode(filename):
         print(f"✅ {filename} print completed!")
         ser.write(("G1 Z180 ; \n").encode())
         ser.close()
+        
         print_progress=100
-        time.sleep(cooldown_time) 
-        arduino = serial.Serial(ARDUINO_PORT, 9600, timeout=2)
-        time.sleep(2)
-        arduino.serial.write(("start").encode())
-        time.sleep(20)
-        arduino.close()
+        cooldown_running = True
+        cooldown_time_left = cooldown_time
+        for _ in range(cooldown_time):
+            time.sleep(1)
+            cooldown_time_left -= 1
+        cooldown_running = False
+
+        try:
+            arduino = serial.Serial(ARDUINO_PORT, 9600, timeout=2)
+            time.sleep(2)
+            arduino.write(b"start")
+            time.sleep(20)
+            arduino.close()
+        except Exception as e:
+            print(f"❌ Error communicating with Arduino: {e}")
     except Exception as e:
         print(f"❌ Error while printing {filename}: {e}")
 
@@ -131,6 +146,14 @@ def generate_frames():
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 # Flask
+@app.route("/print_progress")
+def print_progress_Status():
+    return jsonify({
+        "file": current_print,
+        "progress": print_progress,
+        "total": 100  # since progress is percent
+    })
+
 @app.route("/")
 def index():
     return render_template(
@@ -148,9 +171,14 @@ def printer_status():
         "printer_connected": printer_connected,
         "printer_status_message": printer_status_message
     })
-@app.route("/print_progress")
-def print_progress_Status():
-    return jsonify({"progress":print_progress})
+# @app.route("/print_progress")
+# def print_progress_Status():
+#     return jsonify({
+#         "file": current_print,
+#         "progress": print_progress,
+#         "total": 100  # percentage out of 100
+#     })
+
 
 @app.route("/upload", methods=["POST"])
 def upload_file():
@@ -169,20 +197,43 @@ def upload_file():
 
     return jsonify({"message": "File uploaded successfully"}), 200
 
+cooldown_time_left = 300  # Track cooldown globally (seconds)
+cooldown_running = False
+
+@app.route("/cooldown_status")
+def cooldown_status():
+    return jsonify({"time_left": cooldown_time_left if cooldown_running else 0})
+
+
+
+# @app.route("/print_now", methods=["POST"])
+# def print_now():
+#     data = request.get_json()
+#     filename = data.get("filename")
+
+#     if not printer_connected:
+#         return jsonify({"message": "❌ Printer not connected. Please check the connection."}), 400
+
+#     if not filename:
+#         return jsonify({"message": "❌ No file selected."}), 400
+
+#     threading.Thread(target=send_gcode, args=(filename,), daemon=True).start()
+#     return jsonify({"message": f"🖨️ Printing {filename} now!"}), 200
+
 @app.route("/print_now", methods=["POST"])
 def print_now():
-    data = request.get_json()
-    filename = data.get("filename")
+    if "file" not in request.files:
+        return jsonify({"message": "No file selected"}), 400
 
-    if not printer_connected:
-        return jsonify({"message": "❌ Printer not connected. Please check the connection."}), 400
+    file = request.files["file"]
+    if file.filename == "" or not file.filename.endswith(".gcode"):
+        return jsonify({"message": "Invalid file type. Please upload a .gcode file"}), 400
 
-    if not filename:
-        return jsonify({"message": "❌ No file selected."}), 400
+    file_path = os.path.join(UPLOAD_FOLDER, file.filename)
+    file.save(file_path)
 
-    threading.Thread(target=send_gcode, args=(filename,), daemon=True).start()
-    return jsonify({"message": f"🖨️ Printing {filename} now!"}), 200
-
+    threading.Thread(target=send_gcode, args=(file.filename,), daemon=True).start()
+    return jsonify({"message": f"🖨️ Printing {file.filename} now!"}), 200
 
 @app.route("/adjust_count", methods=["POST"])
 def adjust_count():
@@ -239,6 +290,29 @@ if not os.path.exists(UPLOAD_FOLDER):
 # Run Flask
 # if __name__ == "__main__":
 #     app.run(debug=True)
+@app.route('/test_cooldown', methods=['POST'])
+def test_cooldown():
+    global cooldown_running, cooldown_time_left
+
+    # If a cooldown is already running, don't start a new one.
+    if cooldown_running:
+        return jsonify({"message": "Cooldown already running!"}), 400
+
+    def cooldown_and_arduino():
+        global cooldown_running, cooldown_time_left
+        cooldown_running = True
+        cooldown_time_left = cooldown_time  # Your configured cooldown (e.g. 180)
+        for _ in range(cooldown_time):
+            time.sleep(1)
+            cooldown_time_left -= 1
+        cooldown_running = False
+
+        # Simulate Arduino job done (Just print/log or update a flag)
+        print("SIM_TEST: Arduino would now remove the part!")
+        # You could extend: set a global status, or trigger something in your web UI via polling, etc.
+
+    threading.Thread(target=cooldown_and_arduino, daemon=True).start()
+    return jsonify({"message": "Test cooldown started!"})
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)  # Use a different port (5001)
