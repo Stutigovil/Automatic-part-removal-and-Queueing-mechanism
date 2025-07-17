@@ -47,7 +47,8 @@
 
     <div class="mb-6 text-center">
       <h3 class="text-xl font-semibold">Cooldown Timer:</h3>
-      <p id="cooldown-timer" class="text-red-400 text-lg">No cooldown active</p>
+      <!-- <p id="cooldown-timer" class="text-red-400 text-lg">No cooldown active</p> -->
+      <div id="cooldown-timer"> 05:00</div>
     </div>
     
 
@@ -112,6 +113,7 @@
 </div>
 
   <script>
+    
     function startQueue() {
       fetch("/start_queue", { method: "POST" })
         .then(response => response.json())
@@ -120,21 +122,51 @@
         });
     }
 
-    function updateCooldown() {
-    fetch("/cooldown_status")
-      .then(response => response.json())
-      .then(data => {
-        let cooldownTimer = document.getElementById("cooldown-timer");
-        if (data.cooldown > 0) {
-          cooldownTimer.innerText = `Cooldown: ${data.cooldown} seconds remaining`;
-        } else {
-          cooldownTimer.innerText = "No cooldown active";
-        }
-      })
-      .catch(error => console.error("Error fetching cooldown status:", error));
-  }
+let cooldownTimer = document.getElementById("cooldown-timer");
+let cooldownInterval = null; // Store the timer ID
 
-  setInterval(updateCooldown, 1000); // Update every second
+function pollCooldown() {
+  fetch("/cooldown_status")
+    .then(response => response.json())
+    .then(data => {
+      let time = typeof data.time_left === "number" ? data.time_left : 0;
+
+      if (cooldownInterval) {
+        clearInterval(cooldownInterval);
+        cooldownInterval = null;
+      }
+
+      if (time > 0) {
+        function updateTimer() {
+          let minutes = String(Math.floor(time / 60)).padStart(2, "0");
+          let seconds = String(time % 60).padStart(2, "0");
+          cooldownTimer.textContent = `${minutes}:${seconds}`;
+          if (time > 0) {
+            time--;
+          } else {
+            clearInterval(cooldownInterval);
+            cooldownInterval = null;
+            cooldownTimer.textContent = "No cooldown active";
+            // Optional: alert("Cooldown complete! Part will be removed...");
+          }
+        }
+        updateTimer(); // Initial call
+        cooldownInterval = setInterval(updateTimer, 1000);
+      } else {
+        cooldownTimer.textContent = "No cooldown active";
+      }
+    })
+    .catch(error => {
+      cooldownTimer.textContent = "No cooldown active";
+      console.error("Cooldown check failed", error);
+    });
+}
+
+// Check every 4 seconds
+setInterval(pollCooldown, 4000);
+pollCooldown();
+
+//setInterval(updateTimer,1000); // Update every second
 
     function clearQueue() {
       fetch("/clear_queue", { method: "POST" })
